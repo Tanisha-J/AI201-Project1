@@ -303,48 +303,126 @@ exactly those exact terms.
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** hybrid search. `store.py::search` now ranks every chunk by
+semantic distance *and* by BM25 keyword score (`rank-bm25`, lowercase
+alphanumeric tokens, no stemming), and fuses the two rankings with reciprocal
+rank fusion (`store.py::_fuse_with_bm25`, `RRF_K = 60`). Each result keeps its
+cosine distance, so the relevance gate still judges meaning; only the *order*
+of the top 5 changes. It's switched by `config.HYBRID` — `AI201_HYBRID=0` gives
+the exact "before" system. Nothing else changed: same chunks, same index, same
+top-k, same cutoff, same prompt.
 
-**Why I picked it:**
-
-<!-- Connect it to a specific diagnosis above in one sentence. If you can't,
-     you picked a fix because it sounded impressive. -->
+**Why I picked it:** my diagnosis said meaning-only retrieval underweights the
+exact names and terms ("reading week", "Kestrel Commons") that are the only
+thing distinguishing this corpus's near-template posts — and keyword matching
+is the direct fix for exact terms.
 
 ### Run Log — After
 
-<!-- Same format, same five criteria, three runs each.
-     `python run_eval.py --label after` -->
+Source file: [`results/run_2026-10-04_2114_after.md`](results/run_2026-10-04_2114_after.md),
+`run_eval.py::main`, 3 runs, cache off, 15 real model calls; aggregated by
+`criteria_report.py::main`.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. Retrieved chunk contains the answer | 4 of 5 |  |  |  |  |
-| 2. Every answer names a source | 5 of 5 |  |  |  |  |
-| 3. Gate stops out-of-corpus questions | 4 of 5 |  |  |  |  |
-| 4. | | | | | |
-| 5. | | | | | |
+| 1. Retrieved chunks contain the answer | 4 of 5 | 4/5 | 4/5 | 4/5 | MET |
+| 2. Every answer names a source | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 3. Gate stops out-of-corpus questions | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 4. Rank-1 chunk is from the answer document | 4 of 5 | 4/5 | 4/5 | 4/5 | MET |
+| 5. Answer states the correct fact | 4 of 5 | 4/5 | 4/5 | 4/5 | MET |
 
-**Did it help?**
+**Before vs after, side by side:**
 
-<!-- Say plainly whether it did, and how you know. If it made things worse,
-     say that — a change that backfired, honestly reported, earns full credit
-     and is more interesting than one that worked. What matters is that you can
-     tell.
+| Criterion | Target | Before (R1/R2/R3) | After (R1/R2/R3) | Change |
+|---|---|---|---|---|
+| 1. Chunks contain the answer | 4 of 5 | 5/5 · 5/5 · 5/5 | 4/5 · 4/5 · 4/5 | worse |
+| 2. Names a source | 5 of 5 | 5/5 · 5/5 · 5/5 | 5/5 · 5/5 · 5/5 | same |
+| 3. Gate refuses out-of-corpus | 4 of 5 | 5/5 · 5/5 · 5/5 | 5/5 · 5/5 · 5/5 | same |
+| 4. Rank-1 is the answer doc | 4 of 5 | 4/5 · 4/5 · 4/5 | 4/5 · 4/5 · 4/5 | same count, different question |
+| 5. Correct fact | 4 of 5 | 5/5 · 5/5 · 5/5 | 4/5 · 4/5 · 4/5 | worse |
 
-     Milestone 4. -->
+What moved, per question (`store.py::search` rankings, deterministic):
+
+| Question | Before | After |
+|---|---|---|
+| Library in reading week | answer doc ranked **2nd** | ranked **1st** ✅ |
+| Halden vs Kestrel | Kestrel ranked **5th** of 5 | ranked **3rd** ✅ |
+| Withdrawal deadline | answer doc ranked **1st** | **not in top 5** ❌ |
+
+Real output after the change — the withdrawal question, run 2:
+```
+- Best distance: 0.4581 (passed the gate)
+- Sources retrieved: admin_add_drop_deadline.txt, admin_pass_fail_option.txt, course_biol_160.txt, course_biol_160_workload.txt, course_engl_205.txt
+
+You can drop (withdraw) through the end of week six, though a drop after week two shows as a W on your transcript. This information comes from `admin_add_drop_deadline.txt`.
+```
+The correct answer is week ten. Before the change, all three runs said "through week ten".
+
+**Did it help?** No — it made the system worse, even though every criterion
+still technically meets its target. It fixed both near-misses I diagnosed, but
+it broke a question that was working, and broke it in the worst way: a
+confident, sourced, *wrong* answer that passes the gate and names a real file.
+Before, the one weakness (library ranked 2nd) still produced the right answer;
+after, a retrieval failure turns into a wrong answer every run.
+
+How I know why: `admin_withdrawal_deadline.txt` is semantic rank 1, but BM25
+ranks it **21st of 88** (score 5.89), because the question says "withdraw" and
+the document only ever says "withdrawal" — with no stemming those are different
+tokens, so BM25 sees no match on the most important word. Meanwhile
+`admin_add_drop_deadline.txt` is BM25 rank 1 (11.63): it matches "week" (three
+times), "course", "can", "you". RRF scores: withdrawal 1/61 + 1/81 = 0.0287,
+add/drop 1/62 + 1/61 = 0.0325 — and three course posts that say "week" a lot
+also outrank it. Keyword search helps when the question uses the document's
+exact words, and hurts when it uses a different form of them.
 
 ## What's Still Broken
 
-<!-- For each criterion still missed after your fix: what you'd do about it,
-     and why you stopped where you did.
+No criterion is formally MISSED after the fix, but that's because my targets
+allowed one failure each, not because nothing is broken:
 
-     "I ran out of time" is fine if it's true. Pretending nothing is left is
-     not.
+- **Criteria 1 and 5 — the withdrawal question (introduced by my fix).** Next
+  step: stem tokens before BM25 (e.g. a Porter stemmer, so withdraw/withdrawal
+  → `withdraw`), and then re-run all three questions this change touched. I
+  didn't add it because the rule for this unit is one change, and stemming is a
+  second change that needs its own before/after. A cheaper alternative is to
+  weight semantic rank above keyword rank in the fusion, since the gate already
+  trusts semantic distance. If neither works, `AI201_HYBRID=0` returns to the
+  "before" system, which was better on my test set.
+- **Criterion 4 — still 4/5, now for a different reason.** The library miss is
+  fixed; the remaining miss is the withdrawal question above, same fix.
+- **The comparison question is still fragile.** Kestrel improved from 5th to
+  3rd, but North Kitchen and Pellew still sit near it. Any question that names
+  two halls needs both in the top k, and nothing in the system guarantees that.
 
-     Milestone 5. -->
+I stopped here because the improvement is measured and explained, and further
+changes would have made it impossible to say which change did what.
 
 ## What I'd Do Differently
 
-<!-- Knowing what you know now — which of your five criteria would you write
-     differently, and why?
+- **Tighten criteria 1 and 5 to 5 of 5.** Both came out 15/15 before the
+  change, so 4 of 5 couldn't catch anything. Worse, my fix *broke* a question
+  and every criterion still said MET. A target that can't tell a better system
+  from a worse one isn't doing its job.
+- **Make criterion 4 5 of 5 too, and add more questions.** With five questions,
+  "4 of 5" means one failure is always free. Ten questions, including more that
+  word things differently from the documents ("withdraw" vs "withdrawal",
+  "laundry" vs "dryer"), would have caught this regression without me
+  reading the per-question output.
+- **Track a per-question regression rule** ("no question that passed before may
+  fail after"), because averages hid the one change that mattered here.
 
-     Milestone 5. -->
+## How I Used AI (unit 2)
+
+**3. Scorer and aggregation.** Claude wrote `scorer.py` (fact matching with
+number-word and time normalisation) and `criteria_report.py`, which turns
+run_eval's per-question file into per-criterion counts. Its first scorer failed
+"every 40-minute loop" against "40 minutes", which a quick test caught before
+the real run; it fixed the normalisation then. I read the Halden/Kestrel
+answers by hand because the scorer only checks that "Halden" appears.
+
+**4. Spotting the pattern and the regression.** Claude noticed that both near-
+misses before the change were near-template posts told apart only by exact
+names, which is why hybrid search was the fix. After the change it found the
+withdrawal regression in the per-question output before I'd read it, and
+checked the BM25 rank (21st of 88) to confirm the stemming explanation rather
+than guessing.
