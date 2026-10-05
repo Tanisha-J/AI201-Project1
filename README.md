@@ -1,6 +1,10 @@
 # The Unofficial Guide
 
-<!-- Replace this line with your name and which corpus you picked. -->
+Tanisha Jain — corpus: `campus_life`
+
+> Note: unit 1 was completed late, at the start of unit 2. The questions and
+> criteria were committed (34c8d9d) before any eval run, so the order in the
+> history is still criteria → results.
 
 > **This file is your submission.** Fill it in as you go — most sections get
 > written during the milestone that produces them, not at the end.
@@ -21,26 +25,26 @@
 
 ## What This Does
 
-<!-- Three or four sentences. Which corpus you picked, and the kinds of
-     questions your system answers. Write it for someone who has never seen
-     this repo.
-
-     Milestone 5. -->
+A question-answering system over `campus_life`: 88 short student-written posts
+about a fictional university's dining halls, dorms, courses, transit and admin
+rules. You ask a plain-English question ("How late is the library open during
+reading week?"), it retrieves the most relevant posts with a local embedding
+model, refuses if nothing is close enough, and otherwise has Gemini answer
+using only those posts, naming the file it used.
 
 ## Chunking Strategy
 
-**Chunk size:**
-**Overlap:**
+**Chunk size:** one whole post per chunk (posts over 800 characters would be split on paragraph breaks — none are)
+**Overlap:** none
 
-<!-- What about YOUR documents made you pick these numbers? Short posts and
-     long sectioned guides don't want the same chunking, and "800 seemed
-     reasonable" earns nothing. Point at something you noticed when you read
-     the documents in Milestone 1.
-
-     If you changed your mind partway through, say so and say why. That's worth
-     more than pretending you got it right first time.
-
-     Milestone 3. -->
+Every post is one short thought: they average 317 characters and the longest
+(`housing_old_brewhouse.txt`) is 554. Splitting them would only separate a
+building's name from its facts — "Laundry in Morrow House" from "$1.50 wash,
+$1.25 dry" — and since seven laundry posts are otherwise word-for-word
+identical, a chunk without the building name is useless. So
+`chunker.py::split_documents` keeps each post whole (88 documents → 88
+chunks), with a paragraph-boundary split as a safety net for anything over
+`CHUNK_SIZE`. Overlap only matters when you cut, so there is none.
 
 ## Sample Chunks
 
@@ -53,29 +57,58 @@
 
      Milestone 3. -->
 
-**Chunk 1** — source: `` — produced by: ``
+**Chunk 1** — source: `admin_add_drop_deadline.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
+On the add/drop deadline
+
+You can add a course through the end of the second week. Dropping is a longer window — through the end of week six — but a drop after week two shows as a W on your transcript. Nothing anywhere on the registrar's site says this plainly, and students find out from each other.
 ```
 
-**Chunk 2** — source: `` — produced by: ``
+**Chunk 2** — source: `course_biol_160.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
+BIOL 160 Cell Biology
+
+I lived here my sophomore year. Format is lecture three times a week with a weekly lab. Assessment: four unit tests and a cumulative final. Not curved.
+
+Expect 9 to 11 hours a week, the heaviest first-year course by reputation.
+
+The one piece of advice: the unit tests come fast, roughly every three weeks; falling behind once is very hard to recover from.
 ```
 
-**Chunk 3** — source: `` — produced by: ``
+**Chunk 3** — source: `course_hist_118_workload.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
+Workload for HIST 118 Modern World History
+
+People keep asking so: a lot of reading, about 120 pages a week, but no problem sets. That's real time, not optimistic time.
+
+It's front-loaded — the first month is heavier than the rest, partly because you're learning the format.
 ```
 
-**Chunk 4** — source: `` — produced by: ``
+**Chunk 4** — source: `dining_pellew_dining_hall_followup.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
+Re: Pellew Dining Hall
+
+Adding to what people have said about Pellew Dining Hall. The wait figure of 12 to 18 minutes at peak matches what I've seen. If you're trying to eat between classes, go before 11:45 and it's a different building entirely.
+
+Also worth saying: the furthest hall from anywhere, next to the athletics centre. Nobody tells you this at orientation.
 ```
 
-**Chunk 5** — source: `` — produced by: ``
+**Chunk 5** — source: `housing_innisfree_hall.txt#0` — produced by: `chunker.py::split_documents`
 
 ```
+Innisfree Hall — what it's actually like
+
+Transferred in last year, so take this with a grain of salt. Built 1991, renovated 2022. Rooms are doubles arranged as pairs sharing one bathroom between two rooms.
+
+The good: the shared-bathroom-between-two-rooms arrangement is the best compromise on campus.
+
+The bad: no air conditioning, which matters for the first three weeks of September.
+
+Laundry costs $1.75 wash, $1.75 dry, app-based. On noise: moderate; the building is L-shaped and the short wing is much quieter.
 ```
 
 ## Sample Answer
@@ -83,14 +116,19 @@
 <!-- One complete question and answer, pasted as text, with the source line
      visible. Milestone 4. -->
 
-**Question:**
+**Question:** How much does it cost to use a dryer in Morrow House?
 
-**Answer:**
+**Answer:** (`python app.py ask ...`, best distance 0.320, cutoff 0.6)
 
 ```
+It costs $1.25 to use a dryer in Morrow House.
+
+Source: housing_morrow_house.txt (also found in housing_morrow_house_laundry.txt)
+
+Sources retrieved: housing_aldridge_hall_laundry.txt, housing_innisfree_hall_laundry.txt, housing_morrow_house.txt, housing_morrow_house_laundry.txt, housing_old_brewhouse_laundry.txt
 ```
 
-**My relevance cutoff:**
+**My relevance cutoff:** 0.6 (kept the default, because my own measurements put it in the middle of a clean gap)
 
 <!-- The number you set in config.py, and how you got there.
 
@@ -101,9 +139,23 @@
 
      Milestone 4. -->
 
+The five in-corpus questions landed between 0.320 and 0.463; the five
+out-of-corpus ones between 0.825 and 0.934. Nothing falls between 0.463 and
+0.825, so any cutoff in that range separates them; 0.6 leaves ~0.14 of margin
+above the worst in-corpus question and ~0.22 below the closest out-of-corpus one.
+
 | Question | In corpus? | Best distance |
 |---|---|---|
-|  |  |  |
+| How often does the campus shuttle run on weekends? | yes | 0.411 |
+| How much does it cost to use a dryer in Morrow House? | yes | 0.320 |
+| What is the last week you can withdraw from a course? | yes | 0.406 |
+| How late is the library open during reading week? | yes | 0.427 |
+| Is a cash meal cheaper at Halden Hall or Kestrel Commons? | yes | 0.463 |
+| What is the capital of Mongolia? | no | 0.825 |
+| How do I change the oil in a diesel engine? | no | 0.934 |
+| Who won the 1994 World Cup? | no | 0.886 |
+| What is the recommended dosage of ibuprofen for a headache? | no | 0.844 |
+| How do I write a for loop in Rust? | no | 0.896 |
 
 ## How I Used AI
 
@@ -116,9 +168,19 @@
 
      Milestone 5. -->
 
-**1.**
+**1. Writing the questions and criteria.** I asked Claude (Claude Code) to
+draft my five test questions and criteria 4 and 5 from the `campus_life`
+documents. It read the whole corpus and deliberately picked questions with
+traps — seven near-identical laundry posts, the drop vs. withdrawal deadlines,
+seven noise posts that all say "library open until 2am". It also added an
+`answer_in` field to each question so criterion 1 could be checked
+mechanically instead of by my judgment. I reviewed them and committed them
+before running anything.
 
-**2.**
+**2. Chunking and the cutoff.** Claude suggested keeping each post as one
+chunk rather than tuning the 800/120 numbers, because no post reaches 800
+characters, and measured the ten best distances that set the cutoff. I kept
+0.6 because the measured gap (0.463 → 0.825) showed it was already safe.
 
 <!-- ── Stretch features ─────────────────────────────────────────────────────
      Doing one? Say so here BEFORE you start. A feature this README never
