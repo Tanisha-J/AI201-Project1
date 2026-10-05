@@ -197,66 +197,109 @@ characters, and measured the ten best distances that set the cutoff. I kept
 
 ## Run Log — Before
 
-<!-- Your five criteria, three runs each. `python run_eval.py --label before`
-     runs the questions, puts the OUT_OF_SCOPE ones through the gate, and
-     writes it all into results/ for you. Targets come from criteria.md; the
-     verdict column is your call.
-
-     Criterion 3 is measured in one deterministic pass rather than three, so
-     the same number goes in all three run columns. That's correct, not lazy.
-
-     Milestone 1. -->
+Source file: [`results/run_2026-10-04_2112_before.md`](results/run_2026-10-04_2112_before.md),
+produced by `run_eval.py::main` (3 runs, cache off, 15 real model calls).
+Per-criterion counts aggregated from it by `criteria_report.py::main`; answers
+scored by `scorer.py::judge`. Corpus `campus_life`, whole-post chunks
+(`chunker.py::split_documents`), top-k 5, cutoff 0.6.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. Retrieved chunk contains the answer | 4 of 5 |  |  |  |  |
-| 2. Every answer names a source | 5 of 5 |  |  |  |  |
-| 3. Gate stops out-of-corpus questions | 4 of 5 |  |  |  |  |
-| 4. | | | | | |
-| 5. | | | | | |
+| 1. Retrieved chunks contain the answer | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 2. Every answer names a source | 5 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 3. Gate stops out-of-corpus questions | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
+| 4. Rank-1 chunk is from the answer document | 4 of 5 | 4/5 | 4/5 | 4/5 | MET |
+| 5. Answer states the correct fact | 4 of 5 | 5/5 | 5/5 | 5/5 | MET |
 
-<!-- Underneath, paste the REAL output for each criterion from one of your
-     runs — the actual text your system produced, not a description of it.
-     Name the file and function that produced it. -->
+Criteria 3 and 4 are identical across runs by construction: both depend only on
+retrieval, which is deterministic. Criteria 2 and 5 depend on the generated
+answer and *could* have moved; they didn't. The runs were real — the wording
+differs between runs (e.g. Morrow House run 1 cites
+"`housing_morrow_house_laundry.txt` (also mentioned in
+`housing_morrow_house.txt`)", run 2 "Sources: housing_morrow_house_laundry.txt
+and housing_morrow_house.txt") — the facts just didn't.
+
+**Real output, run 1** (from `results/run_2026-10-04_2112_before.md`):
+
+*Criterion 1* — `store.py::search`, sources retrieved for the comparison question (both `answer_in` documents present):
+```
+- Best distance: 0.4630 (passed the gate)
+- Sources retrieved: admin_dining_dollars.txt, dining_halden_hall.txt, dining_kestrel_commons.txt, dining_north_kitchen.txt, dining_pellew_dining_hall.txt
+```
+
+*Criterion 2* — `generate.py::answer_from_chunks`:
+```
+You can withdraw from a course through week ten, according to admin_withdrawal_deadline.txt.
+```
+
+*Criterion 3* — `run_eval.py::check_out_of_scope`, cutoff 0.6:
+```
+| What is the capital of Mongolia? | 0.825 | refused |
+| How do I change the oil in a diesel engine? | 0.934 | refused |
+| Who won the 1994 World Cup? | 0.886 | refused |
+| What is the recommended dosage of ibuprofen for a headache? | 0.844 | refused |
+| How do I write a for loop in Rust? | 0.896 | refused |
+```
+
+*Criterion 4* — `store.py::search` ranking, the one question where rank 1 was wrong:
+```
+How late is the library open during reading week?
+  1. admin_library_holds.txt          0.427   <- not the answer document
+  2. study_library_hours.txt          0.450   <- the answer
+  3. housing_morrow_house_noise.txt   0.485
+  4. housing_calder_annexe_noise.txt  0.497
+  5. dining_north_kitchen_followup.txt 0.523
+```
+
+*Criterion 5* — `generate.py::answer_from_chunks`, scored by `scorer.py::judge`:
+```
+The library is open until 10pm during reading week (from study_library_hours.txt).
+A cash meal is cheaper at Halden Hall, where it costs $10.00 cash compared to $12.50 cash at Kestrel Commons (dining_halden_hall.txt and dining_kestrel_commons.txt).
+```
 
 ## Verdicts
 
-<!-- MET or MISSED for each of the five, against the target you wrote last
-     unit — not a new one. Plus a sentence on how you decided. That sentence
-     matters most where it was close.
-
-     If your target said 4 of 5 and your runs came out 4, 3, 4, that's a MISS.
-     The target has to hold, not show up occasionally.
-
-     Milestone 2. -->
-
 | # | Criterion | Verdict | How I decided |
 |---|---|---|---|
-| 1 |  |  |  |
-| 2 |  |  |  |
-| 3 |  |  |  |
-| 4 |  |  |  |
-| 5 |  |  |  |
+| 1 | Retrieved chunks contain the answer (4 of 5) | MET | 5/5 in all three runs; every `answer_in` document was in the top 5 every time, so there's no generous reading involved. |
+| 2 | Every answer names a source (5 of 5) | MET | All 15 answers contain a corpus filename; the strictest target I set, and it held in every run. |
+| 3 | Gate stops out-of-corpus questions (4 of 5) | MET | 5/5 refused; the closest out-of-scope question (Mongolia, 0.825) is still 0.225 over the cutoff. |
+| 4 | Rank-1 chunk is from the answer document (4 of 5) | MET — barely | 4/5 in all three runs, exactly on the target. The opposite case: one more wrong rank-1 misses it, and the library question shows the mechanism that would cause it. But the target was 4 of 5, it held 4 of 5 in every run, and the miss is the question I predicted would be hard. |
+| 5 | Answer states the correct fact (4 of 5) | MET | 15/15 answers contained the expected fact. I also read the Halden/Kestrel answers by hand since the scorer only checks "Halden" appears; all three state Halden $10.00 vs Kestrel $12.50 correctly. |
 
 ## Diagnoses
 
-<!-- For each miss: which stage caused it, and how. The stage alone isn't
-     enough — you need the mechanism.
+**Nothing was missed.** That mostly says my targets were safe, not that the
+system is excellent: four of five criteria cleared their target with room to
+spare, on questions I chose knowing the corpus. If I were setting them again
+I'd tighten criterion 1 and criterion 5 to **5 of 5** (both came out 15/15) and
+criterion 4 to **5 of 5**, since it's the only one with real signal.
 
-     Not a diagnosis: "Question 3 didn't work."
-     A diagnosis:     "Question 3 asks about laundry costs. The answer is in
-                       one sentence that got split across two chunks, so
-                       neither chunk on its own contains it."
+The two near-misses are still worth diagnosing, because they share a cause and
+they're the first things that would break with harder questions:
 
-     The five stages: loading → chunking → embedding → retrieval → generation.
+1. **Criterion 4, the library question — stage: embedding/retrieval.** The
+   answer document `study_library_hours.txt` ranks 2nd (0.450) behind
+   `admin_library_holds.txt` (0.427). The whole post is embedded as a single
+   384-dim vector, and both posts are overwhelmingly "about the library", so
+   they land close together. The words that actually separate them — "reading
+   week", "10pm" — are a handful of tokens in a 300-character post and barely
+   move its vector. Generation recovered (it read the 2nd chunk), so the
+   answer was right, but retrieval was wrong.
 
-     Look for a pattern. If three misses all ask about numbers, that's one
-     problem, not three.
+2. **The comparison question — stage: retrieval.** `dining_kestrel_commons.txt`
+   came in **5th of 5** (0.598), behind North Kitchen (0.493) and Pellew
+   (0.571), which the question never mentions. Every dining post has the same
+   template ("Wait times: ... Hours are ... Costs one meal swipe, or $X cash"),
+   so to the embedding they are all "a dining hall post about cost". The
+   question's exact name, "Kestrel Commons", is the strongest signal and
+   semantic search treats it as just more dining vocabulary. At top-k 4 this
+   question would have failed criterion 1 and criterion 5.
 
-     Missed nothing? Say so, then say honestly whether your targets were set
-     low, and which one you'd tighten and to what.
-
-     Milestone 3. -->
+**Pattern:** both are the same problem. The corpus is full of near-template
+posts (7 dining, 7 laundry, 7 noise, 7 course triples) that differ only in
+proper names and specific terms, and meaning-only retrieval underweights
+exactly those exact terms.
 
 ## The Improvement
 
